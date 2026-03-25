@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ZKB Kill Map</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+:root {
+  --bg:#020408; --panel:#060d14; --border:#0d2235;
+  --accent:#00c8ff; --accent2:#ff4444;
+  --text:#7ec8e3; --text-dim:#2a5a72;
+  --glow:0 0 8px #00c8ff55;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace}
+
+/* ── Layout: desktop = side by side, mobile = stacked ── */
+body{display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0;z-index:20;gap:8px;flex-wrap:wrap}
+.logo{font-family:'Orbitron',monospace;font-size:13px;font-weight:700;letter-spacing:3px;color:var(--accent);text-shadow:var(--glow);white-space:nowrap}
+.logo span{color:var(--accent2)}
+.status-bar{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--text-dim);flex-wrap:wrap}
+.dot{width:6px;height:6px;border-radius:50%;background:#555;display:inline-block;margin-right:5px;transition:background .3s}
+.dot.live{background:#00ff88;box-shadow:0 0 6px #00ff8888;animation:pulse 2s infinite}
+.dot.error{background:#ff4444}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#kills-count{color:var(--accent)}
+#alert-btn{background:none;border:1px solid var(--border);color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;padding:3px 8px;cursor:pointer;letter-spacing:1px;transition:all .2s;white-space:nowrap}
+#alert-btn:hover,#alert-btn.active{border-color:var(--accent);color:var(--accent)}
+#alert-btn.active{background:#001a2a}
+
+.main{display:flex;flex:1;overflow:hidden;min-height:0}
+
+/* Desktop: map left, sidebar right */
+#map-container{flex:1;position:relative;overflow:hidden;cursor:grab;min-height:0}
+#map-container:active{cursor:grabbing}
+canvas{position:absolute;top:0;left:0}
+#sidebar{width:360px;border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+
+/* Mobile: stacked */
+@media(max-width:700px){
+  .main{flex-direction:column}
+  #map-container{flex:none;height:50vh;width:100%;border-bottom:2px solid var(--border)}
+  #sidebar{width:100%;flex:1;border-left:none;min-height:0}
+  .ctrl-btn{width:36px;height:36px;font-size:18px}
+  .controls{bottom:10px;left:10px;gap:6px}
+  #kill-feed{overflow-y:auto;-webkit-overflow-scrolling:touch}
+}
+
+.sidebar-header{padding:9px 14px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase;flex-shrink:0}
+#kill-feed{flex:1;overflow-y:auto;padding:4px 0;min-height:0}
+#kill-feed::-webkit-scrollbar{width:3px}
+#kill-feed::-webkit-scrollbar-track{background:var(--panel)}
+#kill-feed::-webkit-scrollbar-thumb{background:var(--border)}
+
+.kill-entry{padding:7px 10px;border-bottom:1px solid #0a1a25;animation:slideIn .3s ease;cursor:pointer;transition:background .15s;display:flex;gap:8px;align-items:flex-start}
+.kill-entry:active,.kill-entry:hover{background:#0a1c2a}
+.kill-entry.alerted{border-left:2px solid #ffaa00;background:#0d1a08}
+@keyframes slideIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+.kill-imgs{display:flex;flex-direction:column;gap:3px;flex-shrink:0}
+.kill-imgs .ship-img{width:64px;height:64px;display:block;background:#0a1a25;border:1px solid #0d2235}
+.kill-imgs .small-imgs{display:flex;gap:3px}
+.kill-imgs .small-imgs img{width:30px;height:30px;display:block;background:#0a1a25;border:1px solid #0d2235}
+.kill-info{flex:1;min-width:0}
+.kill-ship{font-size:11px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kill-victim{font-size:10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.kill-meta{font-size:10px;color:var(--text-dim);margin-top:2px;display:flex;justify-content:space-between;gap:4px}
+.kill-value{color:#ffaa00}.kill-system{color:var(--text);overflow:hidden;text-overflow:ellipsis}.kill-att{color:#ff6666;white-space:nowrap}
+
+/* Map controls */
+#tooltip{position:absolute;background:rgba(6,13,20,.95);border:1px solid var(--accent);padding:8px 12px;font-size:11px;pointer-events:none;display:none;z-index:100;box-shadow:0 0 12px #00c8ff33;max-width:180px}
+.tt-name{color:var(--accent);font-size:12px;margin-bottom:3px}.tt-sec{color:var(--text-dim)}
+.controls{position:absolute;bottom:14px;left:14px;display:flex;flex-direction:column;gap:4px;z-index:10}
+.ctrl-btn{width:30px;height:30px;background:var(--panel);border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;user-select:none}
+.ctrl-btn:hover{border-color:var(--accent);color:var(--accent);box-shadow:var(--glow)}
+.corner{position:absolute;width:10px;height:10px;pointer-events:none}
+.corner.tl{top:4px;left:4px;border-top:1px solid var(--accent);border-left:1px solid var(--accent)}
+.corner.tr{top:4px;right:4px;border-top:1px solid var(--accent);border-right:1px solid var(--accent)}
+.corner.bl{bottom:4px;left:4px;border-bottom:1px solid var(--accent);border-left:1px solid var(--accent)}
+.corner.br{bottom:4px;right:4px;border-bottom:1px solid var(--accent);border-right:1px solid var(--accent)}
+
+/* Loading overlay */
+.screen{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:var(--bg);z-index:50;gap:12px}
+.loading-text{font-family:'Orbitron',monospace;font-size:11px;letter-spacing:3px;color:var(--text-dim);animation:blink 1.5s infinite;text-align:center;padding:0 20px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.scanline{width:180px;height:2px;background:var(--accent);animation:scan 1.5s infinite;box-shadow:var(--glow)}
+@keyframes scan{0%{transform:scaleX(0);transform-origin:left}50%{transform:scaleX(1);transform-origin:left}50.01%{transform:scaleX(1);transform-origin:right}100%{transform:scaleX(0);transform-origin:right}}
+
+/* Alert panel */
+#alert-panel{display:none;position:fixed;inset:0;background:rgba(2,4,8,.85);z-index:200;align-items:center;justify-content:center;padding:16px}
+#alert-panel.open{display:flex}
+.alert-box{background:var(--panel);border:1px solid var(--accent);width:100%;max-width:460px;max-height:90vh;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+.alert-box h2{font-family:'Orbitron',monospace;font-size:13px;letter-spacing:2px;color:var(--accent)}
+.alert-box p{font-size:11px;color:var(--text-dim);line-height:1.6}
+.alert-section h3{font-size:10px;letter-spacing:2px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase}
+.alert-row{display:flex;gap:6px;margin-bottom:6px}
+.alert-row input{flex:1;background:#020c14;border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;padding:5px 8px;outline:none}
+.alert-row input:focus{border-color:var(--accent)}
+.alert-row button,.alert-close{background:none;border:1px solid var(--border);color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:11px;padding:5px 10px;cursor:pointer;transition:all .15s}
+.alert-row button:hover,.alert-close:hover{border-color:var(--accent);color:var(--accent)}
+.alert-tags{display:flex;flex-wrap:wrap;gap:4px;min-height:24px}
+.tag{background:#0a1a25;border:1px solid var(--border);font-size:10px;padding:2px 6px;display:flex;align-items:center;gap:5px;color:var(--text)}
+.tag .rm{cursor:pointer;color:var(--accent2);font-size:12px;line-height:1}
+.tag .rm:hover{color:#ff8888}
+.alert-footer{display:flex;justify-content:flex-end;gap:8px;padding-top:4px;border-top:1px solid var(--border)}
+.alert-close{border-color:var(--accent);color:var(--accent);padding:6px 16px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ZKB<span>·</span>MAP</div>
+  <div class="status-bar">
+    <div><span class="dot" id="dot"></span><span id="status-text">LOADING</span></div>
+    <div>KILLS: <span id="kills-count">0</span></div>
+    <div id="isk-text">ISK: 0</div>
+  </div>
+  <button id="alert-btn" onclick="openAlerts()">⚡ ALERTS</button>
+</header>
+
+<div class="main">
+  <div id="map-container">
+    <canvas id="bg-canvas"></canvas>
+    <canvas id="main-canvas"></canvas>
+    <div id="tooltip"><div class="tt-name" id="tt-name"></div><div class="tt-sec" id="tt-sec"></div></div>
+    <div class="controls">
+      <button class="ctrl-btn" id="zi">+</button>
+      <button class="ctrl-btn" id="zo">−</button>
+      <button class="ctrl-btn" id="zr" style="font-size:11px">⌂</button>
+    </div>
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="screen" id="loading-screen">
+      <div class="loading-text" id="loading-text">LOADING STAR MAP</div>
+      <div class="scanline"></div>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-header">Recent Kills</div>
+    <div id="kill-feed"></div>
+  </div>
+</div>
+
+<!-- Alert configuration panel -->
+<div id="alert-panel">
+  <div class="alert-box">
+    <h2>⚡ KILL ALERTS</h2>
+    <p>When a matching kill arrives, the zkillboard page opens automatically in a background tab. Enter IDs below — you can find them by searching zkillboard.com and copying the number from the URL.</p>
+
+    <div class="alert-section">
+      <h3>Ship Type IDs</h3>
+      <div class="alert-row">
+        <input id="inp-ship" type="number" placeholder="e.g. 670 (Capsule)">
+        <button onclick="addAlert('ships',document.getElementById('inp-ship').value,'inp-ship')">ADD</button>
+      </div>
+      <div class="alert-tags" id="tags-ships"></div>
+    </div>
+
+    <div class="alert-section">
+      <h3>Corporation IDs</h3>
+      <div class="alert-row">
+        <input id="inp-corp" type="number" placeholder="e.g. 109299958">
+        <button onclick="addAlert('corps',document.getElementById('inp-corp').value,'inp-corp')">ADD</button>
+      </div>
+      <div class="alert-tags" id="tags-corps"></div>
+    </div>
+
+    <div class="alert-section">
+      <h3>Alliance IDs</h3>
+      <div class="alert-row">
+        <input id="inp-alli" type="number" placeholder="e.g. 99005338">
+        <button onclick="addAlert('allis',document.getElementById('inp-alli').value,'inp-alli')">ADD</button>
+      </div>
+      <div class="alert-tags" id="tags-allis"></div>
+    </div>
+
+    <div class="alert-footer">
+      <button class="alert-close" onclick="closeAlerts()">DONE</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────
+const QUEUE_ID = 'zkbmap_' + Math.random().toString(36).slice(2,10);
+const REDISQ   = 'https://zkillredisq.stream/listen.php';
+const ESI_BASE = 'https://esi.evetech.net/latest';
+const SDE_URL  = 'https://www.fuzzwork.co.uk/dump/latest/mapSolarSystems.csv';
+const IMG      = 'https://images.evetech.net';
+
+// ── Alerts — persisted in localStorage ───────────────────────────────
+let alerts = {ships:[], corps:[], allis:[]};
+function loadAlerts(){
+  try{ const s=localStorage.getItem('zkb_alerts'); if(s) alerts=JSON.parse(s); } catch(e){}
+  renderTags();
+  updateAlertBtn();
+}
+function saveAlerts(){ try{localStorage.setItem('zkb_alerts',JSON.stringify(alerts));}catch(e){} }
+function addAlert(type, val, inputId){
+  const id = parseInt(val);
+  if(!id || id<=0) return;
+  if(!alerts[type].includes(id)) alerts[type].push(id);
+  saveAlerts(); renderTags();
+  document.getElementById(inputId).value='';
+  updateAlertBtn();
+}
+function removeAlert(type, id){
+  alerts[type]=alerts[type].filter(x=>x!==id);
+  saveAlerts(); renderTags(); updateAlertBtn();
+}
+function renderTags(){
+  ['ships','corps','allis'].forEach(type=>{
+    const el=document.getElementById('tags-'+type);
+    el.innerHTML='';
+    alerts[type].forEach(id=>{
+      const t=document.createElement('span');
+      t.className='tag';
+      t.innerHTML=`${id} <span class="rm" onclick="removeAlert('${type}',${id})">✕</span>`;
+      el.appendChild(t);
+    });
+  });
+}
+function updateAlertBtn(){
+  const total=alerts.ships.length+alerts.corps.length+alerts.allis.length;
+  const btn=document.getElementById('alert-btn');
+  btn.className=total>0?'active':'';
+  btn.textContent=total>0?`⚡ ALERTS (${total})`:'⚡ ALERTS';
+}
+function openAlerts(){ document.getElementById('alert-panel').classList.add('open'); }
+function closeAlerts(){ document.getElementById('alert-panel').classList.remove('open'); }
+
+function checkAlerts(pkg){
+  const km=pkg.killmail; if(!km)return;
+  const v=km.victim||{};
+  const kid=pkg.killID||km.killmail_id;
+  if(!kid)return;
+  const url='https://zkillboard.com/kill/'+kid+'/';
+  if(alerts.ships.includes(v.ship_type_id)||
+     alerts.corps.includes(v.corporation_id)||
+     alerts.allis.includes(v.alliance_id)){
+    window.open(url,'_blank');
+    return true;
+  }
+  return false;
+}
+
+// ── State ─────────────────────────────────────────────────────────────
+let systems={}, sa=[], kills=[], totalKills=0, totalIsk=0, mapReady=false;
+const shipNames={};
+
+// ── Canvas ────────────────────────────────────────────────────────────
+const mc  = document.getElementById('map-container');
+const bgEl= document.getElementById('bg-canvas'),  bgc=bgEl.getContext('2d');
+const cv  = document.getElementById('main-canvas'), ctx=cv.getContext('2d');
+let W, H;
+function resize(){
+  W=mc.clientWidth; H=mc.clientHeight;
+  bgEl.width=cv.width=W; bgEl.height=cv.height=H;
+  drawStars(); drawMap();
+}
+window.addEventListener('resize',resize);
+
+// ── Mouse pan/zoom ────────────────────────────────────────────────────
+let sc=1,ox=0,oy=0,drag=false,dx,dy,dox,doy;
+cv.addEventListener('mousedown',e=>{drag=true;dx=e.clientX;dy=e.clientY;dox=ox;doy=oy});
+window.addEventListener('mouseup',()=>drag=false);
+window.addEventListener('mousemove',e=>{
+  if(drag){ox=dox+(e.clientX-dx);oy=doy+(e.clientY-dy);drawMap();}
+  else hoverTip(e);
+});
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const f=e.deltaY<0?1.1:.9,r=cv.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  ox=mx-(mx-ox)*f; oy=my-(my-oy)*f;
+  sc=Math.max(.2,Math.min(12,sc*f)); drawMap();
+},{passive:false});
+document.getElementById('zi').onclick=()=>zoom(1.2);
+document.getElementById('zo').onclick=()=>zoom(.8);
+document.getElementById('zr').onclick=resetView;
+function zoom(f){const cx=W/2,cy=H/2;ox=cx-(cx-ox)*f;oy=cy-(cy-oy)*f;sc=Math.max(.2,Math.min(12,sc*f));drawMap();}
+
+// ── Touch pan/zoom ────────────────────────────────────────────────────
+let t1=null,t2=null,tox,toy,tpinchDist;
+cv.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(e.touches.length===1){drag=true;t1=e.touches[0];dx=t1.clientX;dy=t1.clientY;dox=ox;doy=oy;}
+  else if(e.touches.length===2){
+    drag=false;t1=e.touches[0];t2=e.touches[1];
+    tox=ox;toy=oy;
+    tpinchDist=Math.hypot(t2.clientX-t1.clientX,t2.clientY-t1.clientY);
+  }
+},{passive:false});
+cv.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(e.touches.length===1&&drag){
+    const t=e.touches[0];
+    ox=dox+(t.clientX-dx); oy=doy+(t.clientY-dy); drawMap();
+  } else if(e.touches.length===2){
+    const ta=e.touches[0],tb=e.touches[1];
+    const dist=Math.hypot(tb.clientX-ta.clientX,tb.clientY-ta.clientY);
+    const f=dist/tpinchDist; tpinchDist=dist;
+    const mx=(ta.clientX+tb.clientX)/2,my=(ta.clientY+tb.clientY)/2;
+    const r=cv.getBoundingClientRect();
+    const lx=mx-r.left,ly=my-r.top;
+    ox=lx-(lx-ox)*f; oy=ly-(ly-oy)*f;
+    sc=Math.max(.2,Math.min(12,sc*f)); drawMap();
+  }
+},{passive:false});
+cv.addEventListener('touchend',()=>{drag=false;t1=t2=null;});
+
+// ── Stars ─────────────────────────────────────────────────────────────
+let stars=[];
+function drawStars(){
+  if(!stars.length) for(let i=0;i<800;i++) stars.push({
+    x:Math.random()*W, y:Math.random()*H,
+    r:Math.random()*1.4,
+    a:Math.random()*.5+.5,   // brighter: was .5+.1
+    b:Math.random()<.05       // 5% are "bright" stars with a tiny halo
+  });
+  bgc.fillStyle='#020408'; bgc.fillRect(0,0,W,H);
+  stars.forEach(s=>{
+    if(s.b){
+      // bright star halo
+      const g=bgc.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r*4);
+      g.addColorStop(0,`rgba(200,230,255,${s.a})`);
+      g.addColorStop(1,'rgba(0,0,0,0)');
+      bgc.beginPath(); bgc.arc(s.x,s.y,s.r*4,0,Math.PI*2);
+      bgc.fillStyle=g; bgc.fill();
+    }
+    bgc.beginPath(); bgc.arc(s.x,s.y,s.r,0,Math.PI*2);
+    bgc.fillStyle=`rgba(210,235,255,${s.a})`; bgc.fill();
+  });
+}
+
+// ── Map ───────────────────────────────────────────────────────────────
+let mnx,mxx,mnz,mxz;
+function buildBounds(){
+  sa=Object.values(systems);
+  mnx=mnz=Infinity; mxx=mxz=-Infinity;
+  sa.forEach(s=>{if(s.x<mnx)mnx=s.x;if(s.x>mxx)mxx=s.x;if(s.z<mnz)mnz=s.z;if(s.z>mxz)mxz=s.z;});
+}
+function resetView(){
+  if(!sa.length)return;
+  const pad=40,rx=mxx-mnx,rz=mxz-mnz;
+  sc=Math.min((W-pad*2)/rx,(H-pad*2)/rz);
+  ox=pad-mnx*sc+(W-pad*2-rx*sc)/2;
+  oy=pad-mnz*sc+(H-pad*2-rz*sc)/2;
+  drawMap();
+}
+function s2s(s){return{sx:s.x*sc+ox,sy:s.z*sc+oy};}
+function secCol(s){if(s>=.5)return'#1a4a2a';if(s>=.1)return'#3a3010';return'#2a0f0f';}
+
+function drawMap(){
+  ctx.clearRect(0,0,W,H);
+  if(!sa.length)return;
+
+  // Systems
+  const r=Math.max(.8,1.5*sc);
+  sa.forEach(s=>{
+    const{sx,sy}=s2s(s);
+    if(sx<-5||sx>W+5||sy<-5||sy>H+5)return;
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
+    ctx.fillStyle=secCol(s.s); ctx.fill();
+  });
+
+  // Kill markers with flare
+  const now=Date.now();
+  kills.forEach(k=>{
+    const sys=systems[k.sid]; if(!sys)return;
+    const{sx,sy}=s2s(sys);
+    if(sx<-30||sx>W+30||sy<-30||sy>H+30)return;
+    const age=(now-k.t)/1000, maxAge=180; if(age>maxAge)return;
+    const op=1-age/maxAge;
+    const br=Math.max(2,3*sc);
+
+    // Expanding ripple ring
+    const ripAge=Math.min(age,3)/3;
+    ctx.beginPath(); ctx.arc(sx,sy,br+ripAge*16,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(255,80,50,${op*(1-ripAge)*.6})`; ctx.lineWidth=1; ctx.stroke();
+
+    // Flare: only for fresh kills (age < 4s)
+    if(age<4){
+      const flareOp=Math.max(0,1-age/4);
+      // outer glow
+      const g=ctx.createRadialGradient(sx,sy,0,sx,sy,br*8);
+      g.addColorStop(0,`rgba(255,160,60,${flareOp*.7})`);
+      g.addColorStop(.4,`rgba(255,50,20,${flareOp*.3})`);
+      g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.beginPath(); ctx.arc(sx,sy,br*8,0,Math.PI*2);
+      ctx.fillStyle=g; ctx.fill();
+      // cross flare lines
+      ctx.save();
+      ctx.strokeStyle=`rgba(255,200,100,${flareOp*.5})`;
+      ctx.lineWidth=1;
+      const fl=br*10;
+      ctx.beginPath(); ctx.moveTo(sx-fl,sy); ctx.lineTo(sx+fl,sy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx,sy-fl); ctx.lineTo(sx,sy+fl); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Core dot
+    ctx.beginPath(); ctx.arc(sx,sy,br,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,80,50,${op*.95})`;
+    ctx.shadowBlur=10*sc; ctx.shadowColor=`rgba(255,60,20,${op*.8})`;
+    ctx.fill(); ctx.shadowBlur=0;
+
+    // Hot white centre for very fresh kills
+    if(age<2){
+      const hotOp=Math.max(0,1-age/2);
+      ctx.beginPath(); ctx.arc(sx,sy,br*.4,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,255,220,${hotOp})`; ctx.fill();
+    }
+  });
+}
+
+// Animate fresh kills
+function animLoop(){
+  const hasFresh=kills.some(k=>(Date.now()-k.t)<5000);
+  if(hasFresh)drawMap();
+  requestAnimationFrame(animLoop);
+}
+animLoop();
+
+// ── Tooltip (desktop only) ────────────────────────────────────────────
+function hoverTip(e){
+  if(!sa.length)return;
+  const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,thr=6;
+  let found=null;
+  for(const s of sa){const{sx,sy}=s2s(s);if(Math.abs(sx-mx)<thr&&Math.abs(sy-my)<thr){found=s;break;}}
+  const tt=document.getElementById('tooltip');
+  if(found){
+    tt.style.display='block'; tt.style.left=(mx+14)+'px'; tt.style.top=(my-10)+'px';
+    document.getElementById('tt-name').textContent=found.n;
+    document.getElementById('tt-sec').textContent='Sec: '+found.s.toFixed(1);
+  } else tt.style.display='none';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function fmtIsk(v){if(v>=1e12)return(v/1e12).toFixed(2)+'T';if(v>=1e9)return(v/1e9).toFixed(2)+'B';if(v>=1e6)return(v/1e6).toFixed(1)+'M';return(v/1e3|0)+'K';}
+function shipImg(id){return id?IMG+'/types/'+id+'/render?size=64':'';}
+function corpImg(id){return id?IMG+'/corporations/'+id+'/logo?size=32':'';}
+function alliImg(id){return id?IMG+'/alliances/'+id+'/logo?size=32':'';}
+
+// ── Kill handling ─────────────────────────────────────────────────────
+function handleKill(pkg){
+  const km=pkg.killmail; if(!km)return;
+  const sid=km.solar_system_id;
+  const value=(pkg.zkb&&pkg.zkb.totalValue)||0;
+  const kid=pkg.killID||km.killmail_id;
+  const victim=km.victim||{};
+  const shipTypeId=victim.ship_type_id;
+  const corpId=victim.corporation_id;
+  const alliId=victim.alliance_id;
+  const attackers=(km.attackers&&km.attackers.length)||0;
+
+  // Check watchlist — open in background tab
+  const alerted = checkAlerts(pkg);
+
+  totalKills++; totalIsk+=value;
+  document.getElementById('kills-count').textContent=totalKills;
+  document.getElementById('isk-text').textContent='ISK: '+fmtIsk(totalIsk);
+
+  kills.push({sid,t:Date.now(),v:value,kid});
+  if(kills.length>300)kills.shift();
+
+  const sysName=(systems[sid]&&systems[sid].n)||('Sys '+sid);
+  const feed=document.getElementById('kill-feed');
+  const d=document.createElement('div');
+  d.className='kill-entry'+(alerted?' alerted':'');
+
+  const shipSrc=shipImg(shipTypeId);
+  const corpSrc=corpImg(corpId);
+  const alliSrc=alliImg(alliId);
+
+  d.innerHTML=`<div class="kill-imgs">
+    ${shipSrc?`<img class="ship-img" src="${shipSrc}" onerror="this.style.visibility='hidden'">`:
+      '<div class="ship-img" style="background:#0a1a25;border:1px solid #0d2235"></div>'}
+    <div class="small-imgs">
+      ${corpSrc?`<img src="${corpSrc}" onerror="this.style.visibility='hidden'">`:
+        '<div style="width:30px;height:30px;background:#0a1a25"></div>'}
+      ${alliSrc?`<img src="${alliSrc}" onerror="this.style.visibility='hidden'">`:
+        '<div style="width:30px;height:30px"></div>'}
+    </div>
+  </div>
+  <div class="kill-info">
+    <div class="kill-ship" id="sn-${kid}">${shipTypeId?'Ship #'+shipTypeId:'Unknown'}</div>
+    <div class="kill-victim" id="vn-${kid}">${corpId?'Corp #'+corpId:''}</div>
+    <div class="kill-meta"><span class="kill-system">${sysName}</span><span class="kill-value">${fmtIsk(value)} ISK</span></div>
+    <div class="kill-meta"><span class="kill-att">▲ ${attackers} attacker${attackers!==1?'s':''}</span></div>
+  </div>`;
+
+  d.onclick=()=>{if(kid)window.open('https://zkillboard.com/kill/'+kid+'/','_blank');};
+  feed.insertBefore(d,feed.firstChild);
+  while(feed.children.length>50)feed.removeChild(feed.lastChild);
+  if(mapReady)drawMap();
+
+  // Resolve ship name
+  if(shipTypeId){
+    if(shipNames[shipTypeId]){
+      const el=document.getElementById('sn-'+kid); if(el)el.textContent=shipNames[shipTypeId];
+    } else {
+      fetch(ESI_BASE+'/universe/types/'+shipTypeId+'/?datasource=tranquility')
+        .then(r=>r.ok?r.json():null).then(data=>{
+          if(data&&data.name){shipNames[shipTypeId]=data.name;const el=document.getElementById('sn-'+kid);if(el)el.textContent=data.name;}
+        }).catch(()=>{});
+    }
+  }
+  // Resolve corp name
+  if(corpId){
+    fetch(ESI_BASE+'/corporations/'+corpId+'/?datasource=tranquility')
+      .then(r=>r.ok?r.json():null).then(data=>{
+        if(data&&data.name){const el=document.getElementById('vn-'+kid);if(el)el.textContent=data.name+(data.ticker?' ['+data.ticker+']':'');}
+      }).catch(()=>{});
+  }
+}
+
+// ── RedisQ polling ────────────────────────────────────────────────────
+async function poll(){
+  const url=REDISQ+'?queueID='+QUEUE_ID+'&ttw=10';
+  try{
+    setStatus(true,'LIVE');
+    const r=await fetch(url,{redirect:'follow'});
+    if(r.status===429){await sleep(5000);poll();return;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const pkg=data.package;
+    if(pkg&&pkg.killID&&pkg.zkb&&pkg.zkb.hash){
+      try{
+        const kr=await fetch(ESI_BASE+'/killmails/'+pkg.killID+'/'+pkg.zkb.hash+'/?datasource=tranquility');
+        if(kr.ok){ const km=await kr.json(); handleKill({killID:pkg.killID,zkb:pkg.zkb,killmail:km}); }
+      }catch(e){}
+    }
+  }catch(e){
+    setStatus(false,'RETRYING'); await sleep(3000);
+  }
+  poll();
+}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function setStatus(live,txt){
+  document.getElementById('dot').className='dot'+(live?' live':' error');
+  document.getElementById('status-text').textContent=txt;
+}
+
+// ── Load map ──────────────────────────────────────────────────────────
+async function loadMap(){
+  const lt=document.getElementById('loading-text');
+  try{
+    lt.textContent='FETCHING STAR MAP…';
+    const r=await fetch(SDE_URL);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const text=await r.text();
+    lt.textContent='PARSING…'; await sleep(10);
+    const lines=text.split('\n');
+    const hdr=lines[0].split(',').map(h=>h.trim().replace(/"/g,''));
+    const col=n=>hdr.indexOf(n);
+    const iID=col('solarSystemID'),iName=col('solarSystemName'),iX=col('x'),iZ=col('z'),iSec=col('security');
+    if(iID<0||iX<0)throw new Error('CSV format mismatch');
+    let count=0;
+    for(let i=1;i<lines.length;i++){
+      const p=lines[i].split(','); if(p.length<=Math.max(iID,iX,iZ,iSec))continue;
+      const sid=parseInt(p[iID]); if(!sid||sid<30000000||sid>30999999)continue;
+      systems[sid]={n:(p[iName]||'').replace(/"/g,''),x:parseFloat(p[iX])/1e13,z:parseFloat(p[iZ])/1e13,s:parseFloat(p[iSec])||0};
+      count++;
+    }
+    if(count===0)throw new Error('No systems parsed');
+    buildBounds(); resize(); resetView(); mapReady=true;
+    document.getElementById('loading-screen').style.display='none';
+    poll();
+  }catch(e){
+    lt.textContent='LOAD FAILED: '+e.message+' — retrying…';
+    setTimeout(loadMap,6000);
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────
+loadAlerts();
+resize();
+loadMap();
+</script>
+</body>
+</html>
