@@ -7,7 +7,7 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
 :root {
-  --bg:#020408; --panel:#060d14; --border:#0d2235;
+  --bg:#010306; --panel:#060d14; --border:#0d2235;
   --accent:#00c8ff; --accent2:#ff4444;
   --text:#7ec8e3; --text-dim:#2a5a72;
   --glow:0 0 8px #00c8ff55;
@@ -41,12 +41,16 @@ canvas{position:absolute;top:0;left:0}
 /* Mobile: stacked */
 @media(max-width:700px){
   .main{flex-direction:column}
-  #map-container{flex:none;height:50vh;width:100%;border-bottom:2px solid var(--border)}
+  #map-container{flex:none;height:50vh;width:100%;border-bottom:2px solid var(--border);transition:height .3s ease}
+  #map-container.hidden{height:0!important;border-bottom:none}
   #sidebar{width:100%;flex:1;border-left:none;min-height:0}
   .ctrl-btn{width:36px;height:36px;font-size:18px}
   .controls{bottom:10px;left:10px;gap:6px}
   #kill-feed{overflow-y:auto;-webkit-overflow-scrolling:touch}
+  #hide-map-btn{display:flex!important}
 }
+#hide-map-btn{display:none;background:none;border:1px solid var(--border);color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;padding:3px 8px;cursor:pointer;letter-spacing:1px;transition:all .2s;white-space:nowrap}
+#hide-map-btn:hover{border-color:var(--accent);color:var(--accent)}
 
 .sidebar-header{padding:9px 14px;border-bottom:1px solid var(--border);font-size:10px;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase;flex-shrink:0}
 #kill-feed{flex:1;overflow-y:auto;padding:4px 0;min-height:0}
@@ -116,11 +120,11 @@ canvas{position:absolute;top:0;left:0}
     <div id="isk-text">ISK: 0</div>
   </div>
   <button id="alert-btn" onclick="openAlerts()">⚡ ALERTS</button>
+  <button id="hide-map-btn" onclick="toggleMap()">▲ MAP</button>
 </header>
 
 <div class="main">
   <div id="map-container">
-    <canvas id="bg-canvas"></canvas>
     <canvas id="main-canvas"></canvas>
     <div id="tooltip"><div class="tt-name" id="tt-name"></div><div class="tt-sec" id="tt-sec"></div></div>
     <div class="controls">
@@ -251,13 +255,12 @@ const shipNames={};
 
 // ── Canvas ────────────────────────────────────────────────────────────
 const mc  = document.getElementById('map-container');
-const bgEl= document.getElementById('bg-canvas'),  bgc=bgEl.getContext('2d');
 const cv  = document.getElementById('main-canvas'), ctx=cv.getContext('2d');
 let W, H;
 function resize(){
   W=mc.clientWidth; H=mc.clientHeight;
-  bgEl.width=cv.width=W; bgEl.height=cv.height=H;
-  drawStars(); drawMap();
+  cv.width=W; cv.height=H;
+  drawMap();
 }
 window.addEventListener('resize',resize);
 
@@ -310,29 +313,7 @@ cv.addEventListener('touchmove',e=>{
 },{passive:false});
 cv.addEventListener('touchend',()=>{drag=false;t1=t2=null;});
 
-// ── Stars ─────────────────────────────────────────────────────────────
-let stars=[];
-function drawStars(){
-  if(!stars.length) for(let i=0;i<800;i++) stars.push({
-    x:Math.random()*W, y:Math.random()*H,
-    r:Math.random()*1.4,
-    a:Math.random()*.5+.5,   // brighter: was .5+.1
-    b:Math.random()<.05       // 5% are "bright" stars with a tiny halo
-  });
-  bgc.fillStyle='#020408'; bgc.fillRect(0,0,W,H);
-  stars.forEach(s=>{
-    if(s.b){
-      // bright star halo
-      const g=bgc.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r*4);
-      g.addColorStop(0,`rgba(200,230,255,${s.a})`);
-      g.addColorStop(1,'rgba(0,0,0,0)');
-      bgc.beginPath(); bgc.arc(s.x,s.y,s.r*4,0,Math.PI*2);
-      bgc.fillStyle=g; bgc.fill();
-    }
-    bgc.beginPath(); bgc.arc(s.x,s.y,s.r,0,Math.PI*2);
-    bgc.fillStyle=`rgba(210,235,255,${s.a})`; bgc.fill();
-  });
-}
+// ── No starfield background (removed per user request) ───────────────
 
 // ── Map ───────────────────────────────────────────────────────────────
 let mnx,mxx,mnz,mxz;
@@ -350,14 +331,14 @@ function resetView(){
   drawMap();
 }
 function s2s(s){return{sx:s.x*sc+ox,sy:s.z*sc+oy};}
-function secCol(s){if(s>=.5)return'#1a4a2a';if(s>=.1)return'#3a3010';return'#2a0f0f';}
+function secCol(s){if(s>=.5)return'#00cc44';if(s>=.1)return'#cc8800';return'#cc2200';}
 
 function drawMap(){
   ctx.clearRect(0,0,W,H);
   if(!sa.length)return;
 
   // Systems
-  const r=Math.max(.8,1.5*sc);
+  const r=Math.max(1,2*sc);
   sa.forEach(s=>{
     const{sx,sy}=s2s(s);
     if(sx<-5||sx>W+5||sy<-5||sy>H+5)return;
@@ -514,6 +495,17 @@ function handleKill(pkg){
         if(data&&data.name){const el=document.getElementById('vn-'+kid);if(el)el.textContent=data.name+(data.ticker?' ['+data.ticker+']':'');}
       }).catch(()=>{});
   }
+}
+
+// ── Hide map toggle (mobile) ─────────────────────────────────────────
+let mapHidden=false;
+function toggleMap(){
+  mapHidden=!mapHidden;
+  const mc=document.getElementById('map-container');
+  const btn=document.getElementById('hide-map-btn');
+  mc.classList.toggle('hidden',mapHidden);
+  btn.textContent=mapHidden?'▼ MAP':'▲ MAP';
+  if(!mapHidden){setTimeout(()=>{resize();resetView();},320);}
 }
 
 // ── RedisQ polling ────────────────────────────────────────────────────
