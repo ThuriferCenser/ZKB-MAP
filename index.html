@@ -234,16 +234,25 @@ function updateAlertBtn(){
 function openAlerts(){ document.getElementById('alert-panel').classList.add('open'); }
 function closeAlerts(){ document.getElementById('alert-panel').classList.remove('open'); }
 
+function openBackground(url){
+  // Use an <a> with target=_blank to reliably open in background tab
+  const a=document.createElement('a');
+  a.href=url; a.target='_blank'; a.rel='noopener noreferrer';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function checkAlerts(pkg){
-  const km=pkg.killmail; if(!km)return;
+  const km=pkg.killmail; if(!km)return false;
   const v=km.victim||{};
   const kid=pkg.killID||km.killmail_id;
-  if(!kid)return;
-  const url='https://zkillboard.com/kill/'+kid+'/';
+  if(!kid)return false;
   if(alerts.ships.includes(v.ship_type_id)||
      alerts.corps.includes(v.corporation_id)||
      alerts.allis.includes(v.alliance_id)){
-    window.open(url,'_blank');
+    openBackground('https://zkillboard.com/kill/'+kid+'/');
     return true;
   }
   return false;
@@ -331,14 +340,14 @@ function resetView(){
   drawMap();
 }
 function s2s(s){return{sx:s.x*sc+ox,sy:s.z*sc+oy};}
-function secCol(s){if(s>=.5)return'#00cc44';if(s>=.1)return'#cc8800';return'#cc2200';}
+function secCol(s){if(s>=.5)return'#1a8a3a';if(s>=.1)return'#8a6010';return'#8a1a10';}
 
 function drawMap(){
   ctx.clearRect(0,0,W,H);
   if(!sa.length)return;
 
   // Systems
-  const r=Math.max(1,2*sc);
+  const r=Math.max(1,1.6*sc);
   sa.forEach(s=>{
     const{sx,sy}=s2s(s);
     if(sx<-5||sx>W+5||sy<-5||sy>H+5)return;
@@ -359,21 +368,21 @@ function drawMap(){
     // Expanding ripple ring
     const ripAge=Math.min(age,3)/3;
     ctx.beginPath(); ctx.arc(sx,sy,br+ripAge*16,0,Math.PI*2);
-    ctx.strokeStyle=`rgba(255,80,50,${op*(1-ripAge)*.6})`; ctx.lineWidth=1; ctx.stroke();
+    ctx.strokeStyle=`rgba(160,210,255,${op*(1-ripAge)*.7})`; ctx.lineWidth=1; ctx.stroke();
 
     // Flare: only for fresh kills (age < 4s)
     if(age<4){
       const flareOp=Math.max(0,1-age/4);
       // outer glow
       const g=ctx.createRadialGradient(sx,sy,0,sx,sy,br*8);
-      g.addColorStop(0,`rgba(255,160,60,${flareOp*.7})`);
-      g.addColorStop(.4,`rgba(255,50,20,${flareOp*.3})`);
+      g.addColorStop(0,`rgba(180,230,255,${flareOp*.8})`);
+      g.addColorStop(.4,`rgba(100,180,255,${flareOp*.3})`);
       g.addColorStop(1,'rgba(0,0,0,0)');
       ctx.beginPath(); ctx.arc(sx,sy,br*8,0,Math.PI*2);
       ctx.fillStyle=g; ctx.fill();
       // cross flare lines
       ctx.save();
-      ctx.strokeStyle=`rgba(255,200,100,${flareOp*.5})`;
+      ctx.strokeStyle=`rgba(200,235,255,${flareOp*.6})`;
       ctx.lineWidth=1;
       const fl=br*10;
       ctx.beginPath(); ctx.moveTo(sx-fl,sy); ctx.lineTo(sx+fl,sy); ctx.stroke();
@@ -383,15 +392,15 @@ function drawMap(){
 
     // Core dot
     ctx.beginPath(); ctx.arc(sx,sy,br,0,Math.PI*2);
-    ctx.fillStyle=`rgba(255,80,50,${op*.95})`;
-    ctx.shadowBlur=10*sc; ctx.shadowColor=`rgba(255,60,20,${op*.8})`;
+    ctx.fillStyle=`rgba(120,190,255,${op*.95})`;
+    ctx.shadowBlur=10*sc; ctx.shadowColor=`rgba(100,200,255,${op*.8})`;
     ctx.fill(); ctx.shadowBlur=0;
 
     // Hot white centre for very fresh kills
     if(age<2){
       const hotOp=Math.max(0,1-age/2);
       ctx.beginPath(); ctx.arc(sx,sy,br*.4,0,Math.PI*2);
-      ctx.fillStyle=`rgba(255,255,220,${hotOp})`; ctx.fill();
+      ctx.fillStyle=`rgba(230,245,255,${hotOp})`; ctx.fill();
     }
   });
 }
