@@ -60,7 +60,10 @@ canvas{position:absolute;top:0;left:0}
 
 .kill-entry{padding:7px 10px;border-bottom:1px solid #0a1a25;animation:slideIn .3s ease;cursor:pointer;transition:background .15s;display:flex;gap:8px;align-items:flex-start}
 .kill-entry:active,.kill-entry:hover{background:#0a1c2a}
-.kill-entry.alerted{border-left:2px solid #ffaa00;background:#0d1a08}
+.kill-entry.alerted-ship{border-left:3px solid #00aaff;background:#001828}
+.kill-entry.alerted-corp{border-left:3px solid #00cc88;background:#001810}
+.kill-entry.alerted-alli{border-left:3px solid #cc88ff;background:#140820}
+.kill-entry.alerted-isk{border-left:3px solid #ffaa00;background:#1a1000}
 @keyframes slideIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
 .kill-imgs{display:flex;flex-direction:column;gap:3px;flex-shrink:0}
 .kill-imgs .ship-img{width:64px;height:64px;display:block;background:#0a1a25;border:1px solid #0d2235}
@@ -105,6 +108,10 @@ canvas{position:absolute;top:0;left:0}
 .alert-row button:hover,.alert-close:hover{border-color:var(--accent);color:var(--accent)}
 .alert-tags{display:flex;flex-wrap:wrap;gap:4px;min-height:24px}
 .tag{background:#0a1a25;border:1px solid var(--border);font-size:10px;padding:2px 6px;display:flex;align-items:center;gap:5px;color:var(--text)}
+.tag.ship{border-color:#00aaff;color:#00aaff;background:#001a2e}
+.tag.corp{border-color:#00cc88;color:#00cc88;background:#001a10}
+.tag.alli{border-color:#cc88ff;color:#cc88ff;background:#1a0a2e}
+.tag.isk{border-color:#ffaa00;color:#ffaa00;background:#1e1400}
 .tag .rm{cursor:pointer;color:var(--accent2);font-size:12px;line-height:1}
 .tag .rm:hover{color:#ff8888}
 .alert-footer{display:flex;justify-content:flex-end;gap:8px;padding-top:4px;border-top:1px solid var(--border)}
@@ -150,10 +157,10 @@ canvas{position:absolute;top:0;left:0}
 <div id="alert-panel">
   <div class="alert-box">
     <h2>⚡ KILL ALERTS</h2>
-    <p>When a matching kill arrives, the zkillboard page opens automatically in a background tab. Enter IDs below — you can find them by searching zkillboard.com and copying the number from the URL.</p>
+    <p>Matching kills are highlighted in the feed. To find IDs: search zkillboard.com for a ship/corp/alliance and copy the number from the URL.</p>
 
     <div class="alert-section">
-      <h3>Ship Type IDs</h3>
+      <h3 style="color:#00aaff">■ Ship Type IDs</h3>
       <div class="alert-row">
         <input id="inp-ship" type="number" placeholder="e.g. 670 (Capsule)">
         <button onclick="addAlert('ships',document.getElementById('inp-ship').value,'inp-ship')">ADD</button>
@@ -162,7 +169,7 @@ canvas{position:absolute;top:0;left:0}
     </div>
 
     <div class="alert-section">
-      <h3>Corporation IDs</h3>
+      <h3 style="color:#00cc88">■ Corporation IDs</h3>
       <div class="alert-row">
         <input id="inp-corp" type="number" placeholder="e.g. 109299958">
         <button onclick="addAlert('corps',document.getElementById('inp-corp').value,'inp-corp')">ADD</button>
@@ -171,12 +178,22 @@ canvas{position:absolute;top:0;left:0}
     </div>
 
     <div class="alert-section">
-      <h3>Alliance IDs</h3>
+      <h3 style="color:#cc88ff">■ Alliance IDs</h3>
       <div class="alert-row">
         <input id="inp-alli" type="number" placeholder="e.g. 99005338">
         <button onclick="addAlert('allis',document.getElementById('inp-alli').value,'inp-alli')">ADD</button>
       </div>
       <div class="alert-tags" id="tags-allis"></div>
+    </div>
+
+    <div class="alert-section">
+      <h3 style="color:#ffaa00">■ Minimum ISK Value</h3>
+      <p style="font-size:10px;color:var(--text-dim);margin-bottom:6px">Highlight any kill above this value. Leave empty to disable.</p>
+      <div class="alert-row">
+        <input id="inp-isk" type="number" placeholder="e.g. 1000000000 (1B ISK)">
+        <button onclick="setIskAlert(document.getElementById('inp-isk').value)">SET</button>
+      </div>
+      <div class="alert-tags" id="tags-isk"></div>
     </div>
 
     <div class="alert-footer">
@@ -190,72 +207,73 @@ canvas{position:absolute;top:0;left:0}
 const QUEUE_ID = 'zkbmap_' + Math.random().toString(36).slice(2,10);
 const REDISQ   = 'https://zkillredisq.stream/listen.php';
 const ESI_BASE = 'https://esi.evetech.net/latest';
-const SDE_URL  = 'https://www.fuzzwork.co.uk/dump/latest/mapSolarSystems.csv';
+const SDE_URL  = 'mapSolarSystems.csv';
 const IMG      = 'https://images.evetech.net';
 
 // ── Alerts — persisted in localStorage ───────────────────────────────
-let alerts = {ships:[], corps:[], allis:[]};
+let alerts = {ships:[], corps:[], allis:[], isk:0};
+let alertedKills = 0;
+
 function loadAlerts(){
-  try{ const s=localStorage.getItem('zkb_alerts'); if(s) alerts=JSON.parse(s); } catch(e){}
-  renderTags();
-  updateAlertBtn();
+  try{ const s=localStorage.getItem('zkb_alerts'); if(s){const p=JSON.parse(s);alerts={ships:p.ships||[],corps:p.corps||[],allis:p.allis||[],isk:p.isk||0};} } catch(e){}
+  renderTags(); updateAlertBtn();
 }
 function saveAlerts(){ try{localStorage.setItem('zkb_alerts',JSON.stringify(alerts));}catch(e){} }
+
 function addAlert(type, val, inputId){
-  const id = parseInt(val);
-  if(!id || id<=0) return;
+  const id=parseInt(val); if(!id||id<=0)return;
   if(!alerts[type].includes(id)) alerts[type].push(id);
   saveAlerts(); renderTags();
   document.getElementById(inputId).value='';
-  updateAlertBtn();
 }
 function removeAlert(type, id){
   alerts[type]=alerts[type].filter(x=>x!==id);
-  saveAlerts(); renderTags(); updateAlertBtn();
+  saveAlerts(); renderTags();
+}
+function setIskAlert(val){
+  const v=parseFloat(val);
+  alerts.isk=(!val||isNaN(v)||v<=0)?0:v;
+  saveAlerts(); renderTags();
+  document.getElementById('inp-isk').value='';
 }
 function renderTags(){
+  const typeClass={ships:'ship',corps:'corp',allis:'alli'};
   ['ships','corps','allis'].forEach(type=>{
-    const el=document.getElementById('tags-'+type);
-    el.innerHTML='';
+    const el=document.getElementById('tags-'+type); el.innerHTML='';
     alerts[type].forEach(id=>{
       const t=document.createElement('span');
-      t.className='tag';
+      t.className='tag '+typeClass[type];
       t.innerHTML=`${id} <span class="rm" onclick="removeAlert('${type}',${id})">✕</span>`;
       el.appendChild(t);
     });
   });
+  // ISK tag
+  const iskEl=document.getElementById('tags-isk'); iskEl.innerHTML='';
+  if(alerts.isk>0){
+    const t=document.createElement('span');
+    t.className='tag isk';
+    t.innerHTML=`> ${fmtIsk(alerts.isk)} <span class="rm" onclick="setIskAlert(0)">✕</span>`;
+    iskEl.appendChild(t);
+  }
 }
 function updateAlertBtn(){
-  const total=alerts.ships.length+alerts.corps.length+alerts.allis.length;
   const btn=document.getElementById('alert-btn');
-  btn.className=total>0?'active':'';
-  btn.textContent=total>0?`⚡ ALERTS (${total})`:'⚡ ALERTS';
+  btn.className=alertedKills>0?'active':'';
+  btn.textContent=alertedKills>0?`⚡ ALERTS (${alertedKills})`:'⚡ ALERTS';
 }
 function openAlerts(){ document.getElementById('alert-panel').classList.add('open'); }
 function closeAlerts(){ document.getElementById('alert-panel').classList.remove('open'); }
 
-function openBackground(url){
-  // Use an <a> with target=_blank to reliably open in background tab
-  const a=document.createElement('a');
-  a.href=url; a.target='_blank'; a.rel='noopener noreferrer';
-  a.style.display='none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
+// Returns CSS class name if kill matches any alert, or '' if not
 function checkAlerts(pkg){
-  const km=pkg.killmail; if(!km)return false;
+  const km=pkg.killmail; if(!km)return'';
   const v=km.victim||{};
-  const kid=pkg.killID||km.killmail_id;
-  if(!kid)return false;
-  if(alerts.ships.includes(v.ship_type_id)||
-     alerts.corps.includes(v.corporation_id)||
-     alerts.allis.includes(v.alliance_id)){
-    openBackground('https://zkillboard.com/kill/'+kid+'/');
-    return true;
-  }
-  return false;
+  const value=(pkg.zkb&&pkg.zkb.totalValue)||0;
+  if(alerts.ships.includes(v.ship_type_id)) return'alerted-ship';
+  if(alerts.corps.includes(v.corporation_id)) return'alerted-corp';
+  if(alerts.allis.includes(v.alliance_id)) return'alerted-alli';
+  if(alerts.isk>0&&value>=alerts.isk) return'alerted-isk';
+  return'';
 }
 
 // ── State ─────────────────────────────────────────────────────────────
@@ -445,8 +463,10 @@ function handleKill(pkg){
   const alliId=victim.alliance_id;
   const attackers=(km.attackers&&km.attackers.length)||0;
 
-  // Check watchlist — open in background tab
-  const alerted = checkAlerts(pkg);
+  // Check watchlist
+  const alertClass = checkAlerts(pkg);
+  const alerted = !!alertClass;
+  if(alerted){ alertedKills++; updateAlertBtn(); }
 
   totalKills++; totalIsk+=value;
   document.getElementById('kills-count').textContent=totalKills;
@@ -458,7 +478,7 @@ function handleKill(pkg){
   const sysName=(systems[sid]&&systems[sid].n)||('Sys '+sid);
   const feed=document.getElementById('kill-feed');
   const d=document.createElement('div');
-  d.className='kill-entry'+(alerted?' alerted':'');
+  d.className='kill-entry'+(alertClass?' '+alertClass:'');
 
   const shipSrc=shipImg(shipTypeId);
   const corpSrc=corpImg(corpId);
