@@ -204,11 +204,10 @@ canvas{position:absolute;top:0;left:0}
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────
-const QUEUE_ID = 'zkbmap_' + Math.random().toString(36).slice(2,10);
-const REDISQ   = 'https://zkillredisq.stream/listen.php';
-const ESI_BASE = 'https://esi.evetech.net/latest';
-const SDE_URL  = 'mapSolarSystems.csv';
-const IMG      = 'https://images.evetech.net';
+const R2Z2_BASE = 'https://r2z2.zkillboard.com/ephemeral';
+const ESI_BASE  = 'https://esi.evetech.net/latest';
+const SDE_URL   = 'mapSolarSystems.csv';
+const IMG       = 'https://images.evetech.net';
 
 // ── Alerts — persisted in localStorage ───────────────────────────────
 let alerts = {ships:[], corps:[], allis:[], isk:0};
@@ -339,8 +338,6 @@ cv.addEventListener('touchmove',e=>{
   }
 },{passive:false});
 cv.addEventListener('touchend',()=>{drag=false;t1=t2=null;});
-
-// ── No starfield background (removed per user request) ───────────────
 
 // ── Map ───────────────────────────────────────────────────────────────
 let mnx,mxx,mnz,mxz;
@@ -537,27 +534,60 @@ function toggleMap(){
   if(!mapHidden){setTimeout(()=>{resize();resetView();},320);}
 }
 
-// ── RedisQ polling ────────────────────────────────────────────────────
+// ── R2Z2 polling (replaces deprecated RedisQ) ─────────────────────────
+let currentSeq = 0;
+
+async function getStartingSequence(){
+  const r = await fetch(R2Z2_BASE + '/sequence.json');
+  if(!r.ok) throw new Error('sequence HTTP ' + r.status);
+  const data = await r.json();
+  return data.sequence;
+}
+
 async function poll(){
-  const url=REDISQ+'?queueID='+QUEUE_ID+'&ttw=10';
   try{
-    setStatus(true,'LIVE');
-    const r=await fetch(url,{redirect:'follow'});
-    if(r.status===429){await sleep(5000);poll();return;}
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();
-    const pkg=data.package;
-    if(pkg&&pkg.killID&&pkg.zkb&&pkg.zkb.hash){
-      try{
-        const kr=await fetch(ESI_BASE+'/killmails/'+pkg.killID+'/'+pkg.zkb.hash+'/?datasource=tranquility');
-        if(kr.ok){ const km=await kr.json(); handleKill({killID:pkg.killID,zkb:pkg.zkb,killmail:km}); }
-      }catch(e){}
+    if(!currentSeq){
+      currentSeq = await getStartingSequence();
+      setStatus(true,'LIVE');
     }
-  }catch(e){
-    setStatus(false,'RETRYING'); await sleep(3000);
+
+    const r = await fetch(`${R2Z2_BASE}/${currentSeq}.json`);
+
+    if(r.status === 404){
+      // No new kill at this sequence yet — wait and retry
+      await sleep(6000);
+      poll();
+      return;
+    }
+    if(r.status === 429 || r.status === 403){
+      setStatus(false,'RATE LIMITED');
+      await sleep(10000);
+      poll();
+      return;
+    }
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+
+    const pkg = await r.json();
+
+    // R2Z2 returns the full ESI killmail inline at the top level,
+    // plus a zkb block. We wrap it to match handleKill's expected shape.
+    if(pkg && pkg.killmail_id){
+      handleKill({
+        killID:   pkg.killmail_id,
+        zkb:      pkg.zkb || {},
+        killmail: pkg   // solar_system_id, victim, attackers etc. are top-level
+      });
+    }
+
+    currentSeq++;
+    await sleep(100); // brief pause between sequence fetches
+  } catch(e){
+    setStatus(false,'RETRYING');
+    await sleep(5000);
   }
   poll();
 }
+
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 function setStatus(live,txt){
   document.getElementById('dot').className='dot'+(live?' live':' error');
@@ -601,4 +631,3 @@ resize();
 loadMap();
 </script>
 </body>
-</html>
